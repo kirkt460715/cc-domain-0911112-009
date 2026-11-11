@@ -6,3 +6,10 @@ GET /observations?source=s1 前两次返回 429，s2 立即返回观测。/histo
 
     node synthetic_exchange/server.js
     node --test synthetic_exchange/smoke.test.js
+
+## 调度器公平性演练
+
+`scheduler_drill.js` 会在临时目录启动 Ledger 与采集调度器，对接本目录的合成场景：s1 反复返回 429，s2 立即返回观测，/history 提供补采数据。演练验证实时任务与历史补采不会被持续限流的来源饿死，429 走 Retry-After 退避，预算和队列状态可查。
+
+    node synthetic_exchange/scheduler_drill.js
+    node --test synthetic_exchange/scheduler_smoke.test.js

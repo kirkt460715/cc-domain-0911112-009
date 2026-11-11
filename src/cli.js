@@ -7,9 +7,11 @@ import {inspectBackup, restoreBackup, compareBackupToStore} from './restore.js';
 import {rollingSummary, dailyCoverage, thresholdRuns} from './resampling.js';
 import {listen} from './http.js';
 import {errorDocument, fail} from './errors.js';
-import {jsonParse, integer} from './value.js';
+import {jsonParse, integer, identifier} from './value.js';
 import {runImport, replayImportPlan} from './pipeline.js';
 import {operationsReport, regionReport, sourceScorecard} from './reports.js';
+import {SchedulerStore} from './scheduler/store.js';
+import {SchedulerEngine} from './scheduler/engine.js';
 
 export function argumentsFor(argv) {
   const [command = 'help', ...rest] = argv;
@@ -22,7 +24,8 @@ export function argumentsFor(argv) {
     }
     options[key.slice(2)] = value;
   }
-  const allowed = ['root', 'input', 'id', 'actor', 'port', 'destination', 'expected-sequence', 'files-root', 'preview'];
+  const allowed = ['root', 'input', 'id', 'actor', 'port', 'destination', 'expected-sequence', 'files-root', 'preview',
+    'scheduler-root', 'config'];
   for (const key of Object.keys(options)) {
     if (!allowed.includes(key)) {
       fail('ARGUMENTS', `Unknown option: ${key}`);
@@ -40,6 +43,20 @@ async function readInput(options) {
   }
   return jsonParse(await fs.readFile(options.input, 'utf8'));
 }
+async function schedulerEngine(ledger, options) {
+  const root = options['scheduler-root'] ?? path.join(options.root, 'scheduler');
+  const config = options.config ? jsonParse(await fs.readFile(options.config, 'utf8'), 'scheduler config') : {};
+  return new SchedulerEngine({store: new SchedulerStore(root), ledger, config});
+}
+async function ensureScheduler(ledger, options) {
+  const engine = await schedulerEngine(ledger, options);
+  await engine.store.initialize();
+  const state = await engine.store.read();
+  if (!state.config) {
+    await engine.store.configure(engine.configInput);
+  }
+  return engine;
+}
 export async function execute(argv) {
   const {command, options} = argumentsFor(argv);
   if (command === 'help') {
@@ -53,6 +70,8 @@ export async function execute(argv) {
         'flatlines', 'disagreements', 'freshness', 'inventory', 'reconcile', 'impact',
         'status', 'catalog', 'batches', 'audit', 'verify', 'checkpoint', 'backup',
         'journal-audit', 'historical-status', 'lineage', 'restore', 'backup-inspect', 'backup-compare', 'rolling', 'coverage', 'runs', 'recover-lock', 'import', 'import-plan', 'operations', 'region', 'scorecard', 'serve',
+        'scheduler-enqueue', 'scheduler-status', 'scheduler-pause', 'scheduler-resume', 'scheduler-takeover',
+        'scheduler-verify', 'scheduler-run',
       ],
       rules: 'All input dates include explicit timezone. State remains under --root. No downloads are required.',
     };
@@ -184,6 +203,51 @@ export async function execute(argv) {
       process.once('SIGINT', stop);
       process.once('SIGTERM', stop);
       return {listening: server.address(), authentication: Boolean(process.env.FIELD_LEDGER_TOKEN)};
+    }
+    case 'scheduler-enqueue': {
+      const engine = await ensureScheduler(ledger, options);
+      return engine.enqueue(input);
+    }
+    case 'scheduler-status': {
+      const engine = await ensureScheduler(ledger, options);
+      return engine.view();
+    }
+    case 'scheduler-pause': {
+      const engine = await ensureScheduler(ledger, options);
+      return engine.pauseSource(identifier(input.source, 'source'));
+    }
+    case 'scheduler-resume': {
+      const engine = await ensureScheduler(ledger, options);
+      return engine.resumeSource(identifier(input.source, 'source'));
+    }
+    case 'scheduler-takeover': {
+      const engine = await ensureScheduler(ledger, options);
+      return engine.takeOver(identifier(input.id, 'task id'));
+    }
+    case 'scheduler-verify': {
+      const engine = await schedulerEngine(ledger, options);
+      return engine.store.verify();
+    }
+    case 'scheduler-run': {
+      const engine = await schedulerEngine(ledger, options);
+      const started = await engine.start();
+      const stop = async () => {
+        await engine.stop();
+        await engine.store.compact();
+      };
+      process.once('SIGINT', () => {
+        stop().catch(() => process.exit(1));
+      });
+      process.once('SIGTERM', () => {
+        stop().catch(() => process.exit(1));
+      });
+      const server = options.port ? await listen(ledger, {
+        port: Number(options.port),
+        token: process.env.FIELD_LEDGER_TOKEN,
+        engine,
+      }) : null;
+      return {running: true, owner: started.owner, scheduler: started.config,
+        http: server ? server.address() : null};
     }
     default:
       fail('COMMAND', `Unknown command: ${command}`);

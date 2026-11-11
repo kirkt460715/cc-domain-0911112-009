@@ -1,6 +1,7 @@
 import http from 'node:http';
 import {LedgerError, errorDocument, fail} from './errors.js';
 import {jsonParse, integer, secureEqual} from './value.js';
+import {isSchedulerRoute, schedulerRequest} from './scheduler/http.js';
 
 async function body(request, maximum) {
   const chunks = [];
@@ -53,6 +54,7 @@ function queryParameters(url) {
 export function createServer(ledger, options = {}) {
   const maximum = integer(options.maximumBody ?? 8 * 1024 * 1024, 'maximumBody', 1024);
   const token = options.token ?? null;
+  const engine = options.engine ?? null;
   const server = http.createServer(async (request, response) => {
     try {
       if (token && !secureEqual(request.headers.authorization, `Bearer ${token}`)) {
@@ -62,6 +64,12 @@ export function createServer(ledger, options = {}) {
       const route = url.pathname;
       const actor = request.headers['x-actor'] ?? 'http';
       let result;
+      if (isSchedulerRoute(request.method, route)) {
+        const input = request.method === 'GET' ? {} : await body(request, maximum);
+        const dispatched = await schedulerRequest(engine, request.method, route, input);
+        send(response, dispatched.status, dispatched.body);
+        return;
+      }
       if (request.method === 'GET') {
         const query = queryParameters(url);
         switch (route) {
@@ -186,9 +194,9 @@ export function createServer(ledger, options = {}) {
   server.keepAliveTimeout = 1000;
   return server;
 }
-export async function listen(ledger, {port = 8080, token} = {}) {
+export async function listen(ledger, {port = 8080, token, engine} = {}) {
   integer(port, 'port', 0, 65535);
-  const server = createServer(ledger, {token});
+  const server = createServer(ledger, {token, engine});
   await new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, '127.0.0.1', resolve);
