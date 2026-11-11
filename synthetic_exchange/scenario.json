@@ -1,0 +1,99 @@
+{
+  "routes": [
+    {
+      "path": "/observations",
+      "query": {
+        "source": "s1"
+      },
+      "responses": [
+        {
+          "status": 429,
+          "headers": {
+            "Retry-After": "2"
+          },
+          "json": {
+            "error": "quota"
+          }
+        },
+        {
+          "status": 429,
+          "headers": {
+            "Retry-After": "2"
+          },
+          "json": {
+            "error": "quota"
+          }
+        },
+        {
+          "json": {
+            "records": [
+              {
+                "station": "p1",
+                "metric": "rainfall",
+                "time": "2026-11-01T00:00:00Z",
+                "revision": 1,
+                "value": 10,
+                "unit": "mm"
+              }
+            ],
+            "complete": true
+          }
+        }
+      ]
+    },
+    {
+      "path": "/observations",
+      "query": {
+        "source": "s2"
+      },
+      "responses": [
+        {
+          "json": {
+            "records": [
+              {
+                "station": "p2",
+                "metric": "rainfall",
+                "time": "2026-11-01T00:00:00Z",
+                "revision": 1,
+                "value": 10,
+                "unit": "mm"
+              }
+            ],
+            "complete": true
+          }
+        }
+      ]
+    },
+    {
+      "path": "/history",
+      "responses": [
+        {
+          "json": {
+            "records": [
+              {
+                "station": "p1",
+                "metric": "rainfall",
+                "time": "2026-10-31T00:00:00Z",
+                "revision": 1,
+                "value": 10,
+                "unit": "mm"
+              }
+            ],
+            "complete": true
+          }
+        }
+      ]
+    },
+    {
+      "path": "/permanent",
+      "responses": [
+        {
+          "status": 400,
+          "json": {
+            "error": "invalid_window"
+          }
+        }
+      ]
+    }
+  ]
+}
